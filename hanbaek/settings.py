@@ -115,5 +115,5 @@ LOGIN_URL = '/login/'
 MEAL_SERVICE_TIME_PER_PERSON = float(os.environ.get('MEAL_SERVICE_TIME_PER_PERSON', '3'))
 
 # ------------------ [관리자 계정 / 학생 계정 분리] ------------------
-ADMIN_SIGNUP_CODE = os.environ.get('ADMIN_SIGNUP_CODE', 'ADMIN')
+ADMIN_SIGNUP_CODE = os.environ.get('ADMIN_SIGNUP_CODE', 'liik')
 
