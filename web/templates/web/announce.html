@@ -1,0 +1,155 @@
+{% extends "web/base.html" %}
+{% block title %}공지사항{% endblock %}
+{% block extra_style %}
+<style>
+    section { margin-bottom: 30px; padding: 16px; border: 1px solid #ddd; border-radius: 8px; }
+
+    .announcement-item { padding: 12px; border-bottom: 1px solid #eee; }
+    .announcement-item:last-child { border-bottom: none; }
+    .announcement-title { font-weight: bold; font-size: 16px; }
+    .announcement-meta { font-size: 12px; color: #888; margin: 4px 0; }
+    .announcement-content { white-space: pre-wrap; }
+    .announcement-delete-btn { font-size: 12px; color: #c62828; background: none; border: none; cursor: pointer; padding: 0; }
+
+    /* 1) 혼잡한 상황 => 다음반 담임에게 공지 자동 등록 .*/
+    .badge-target { display: inline-block; font-size: 11px; color: #1565c0; background: #e3f2fd; border-radius: 4px; padding: 1px 6px; margin-right: 4px; }
+    .badge-auto { display: inline-block; font-size: 11px; color: #c62828; background: #ffebee; border-radius: 4px; padding: 1px 6px; margin-right: 4px; }
+
+    #writeForm input, #writeForm textarea, #writeForm select { width: 100%; margin-bottom: 8px; padding: 6px; box-sizing: border-box; }
+    #writeForm textarea { min-height: 80px; }
+</style>
+{% endblock %}
+{% block content %}
+    <h1>공지사항</h1>
+
+    <!-- ===================== 공지 작성 폼 (관리자 전용) ===================== -->
+    {% if nav_is_admin %}
+    <section id="write-section">
+        <h2>공지 작성</h2>
+        <form id="writeForm">
+            <input type="text" id="announceTitle" placeholder="제목" required>
+            <textarea id="announceContent" placeholder="내용" required></textarea>
+            <!-- 1) 혼잡한 상황 => 다음반 담임에게 공지 자동 등록 관
+             리자가 직접 특정 반만을 대상으로 공지를 쓰고 싶을 때 전체를 , 선택  -->
+            <select id="announceTargetClass">
+                <option value="">공지 대상: 전체</option>
+            </select>
+            <button type="submit">공지 등록</button>
+        </form>
+        <p id="writeMsg"></p>
+    </section>
+    {% endif %}
+
+    <!-- ===================== 공지 목록 ===================== -->
+    <section id="announcement-list-section">
+        <h2>공지 목록</h2>
+        <div id="announcementList">불러오는 중...</div>
+    </section>
+
+    <script>
+        const isAdmin = {% if nav_is_admin %}true{% else %}false{% endif %};
+
+        // 공지 목록을 서버에서 받아와 화면에 표시하는 함수
+        async function loadAnnouncements() {
+            const res = await fetch('/api/announcements/');
+            const data = await res.json();
+            const listBox = document.getElementById('announcementList');
+            listBox.innerHTML = '';
+
+            if (data.announcements.length === 0) {
+                listBox.innerHTML = '<p>아직 등록된 공지가 없습니다.</p>';
+                return;
+            }
+
+            for (let i = 0; i < data.announcements.length; i++) {
+                const item = data.announcements[i];
+
+                let deleteButtonHtml = '';
+                if (isAdmin) {
+                    deleteButtonHtml =
+                        '<button class="announcement-delete-btn" onclick="deleteAnnouncement(' + item.id + ')">삭제</button>';
+                }
+
+                // 1) 혼잡한 상황 => 다음반 담임에게 공지 자동 등록
+                let badgesHtml = '';
+                if (item.target_class_name) {
+                    badgesHtml += '<span class="badge-target">' + item.target_class_name + ' 대상</span>';
+                } else {
+                    badgesHtml += '<span class="badge-target">전체</span>';
+                }
+                if (item.is_auto) {
+                    badgesHtml += '<span class="badge-auto">자동 알림</span>';
+                }
+
+                const div = document.createElement('div');
+                div.className = 'announcement-item';
+                div.innerHTML =
+                    '<div class="announcement-title">' + badgesHtml + item.title + '</div>' +
+                    '<div class="announcement-meta">' + item.author + ' · ' + item.created_at + ' ' + deleteButtonHtml + '</div>' +
+                    '<div class="announcement-content">' + item.content + '</div>';
+                listBox.appendChild(div);
+            }
+        }
+
+        // 관리자라면, 공지 작성 폼의 대상 반 선택 상자에 실제 등록된 반 목록을 채워 넣는다. (학생 계정은 폼 자체가 없으므로 실행되지 않는다)
+        async function loadClassOptionsForWriteForm() {
+            const targetSelect = document.getElementById('announceTargetClass');
+            if (!targetSelect) {
+                return;
+            }
+            const res = await fetch('/classrooms/');
+            const classrooms = await res.json();
+            for (let i = 0; i < classrooms.length; i++) {
+                const option = document.createElement('option');
+                option.value = classrooms[i].cls_id;
+                option.textContent = classrooms[i].name;
+                targetSelect.appendChild(option);
+            }
+        }
+
+        const writeForm = document.getElementById('writeForm');
+        if (writeForm) {
+            writeForm.addEventListener('submit', async function (e) {
+                e.preventDefault();
+
+                const title = document.getElementById('announceTitle').value;
+                const content = document.getElementById('announceContent').value;
+                // 선택 상자 값이 빈 문자열(전체 반)이면 target_class_id를 null로 보내서 전체 공지로 저장되게 한다.
+                const targetClassSelect = document.getElementById('announceTargetClass');
+                const targetClassId = targetClassSelect && targetClassSelect.value ? targetClassSelect.value : null;
+
+                const res = await fetch('/api/announcements/create/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: title, content: content, target_class_id: targetClassId })
+                });
+                const data = await res.json();
+
+                document.getElementById('writeMsg').innerText = data.message || data.error;
+
+                if (data.success) {
+                    document.getElementById('announceTitle').value = '';
+                    document.getElementById('announceContent').value = '';
+                    targetClassSelect.value = '';
+                    loadAnnouncements();   // 목록을 다시 불러와서 새로 쓴 공지가 바로 보이게 한다.
+                }
+            });
+        }
+
+        // 공지 삭제 처리
+        async function deleteAnnouncement(announcementId) {
+            const res = await fetch('/api/announcements/' + announcementId + '/delete/', {
+                method: 'POST',
+            });
+            const data = await res.json();
+            if (data.success) {
+                loadAnnouncements();
+            } else {
+                alert(data.error);
+            }
+        }
+
+        loadAnnouncements();
+        loadClassOptionsForWriteForm();  
+    </script>
+{% endblock %}

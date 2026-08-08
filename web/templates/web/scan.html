@@ -1,0 +1,164 @@
+<!--
+    학생증을 찍는 순간 다음 두 가지를 계산해서 화면에 보여주는 페이지다.
+    1) 문자와 식 : 예상 대기시간 = 대기인원(x) × 1인당 배식시간(t)
+    2) 일차부등식 : 대기시간이 5분보다 크거나 대기인원이 50명보다 많으면 경고를 보여준다.
+-->
+{% extends "web/base.html" %}
+{% block title %}급식 배식 스캔{% endblock %}
+{% block extra_style %}
+<style>
+    #scan-box { text-align: center; padding-top: 40px; }
+    #barcode { font-size: 24px; padding: 10px; width: 300px; }
+    #result { margin-top: 30px; font-size: 20px; }
+    .ok { color: #2e7d32; }
+    .warn { color: #c62828; font-weight: bold; }
+    .linecut { color: #b45309; font-weight: bold; } 
+
+    /* 카메라 스캔 영역 */
+    #cameraBtn { margin-top: 16px; font-size: 16px; padding: 8px 16px; cursor: pointer; }
+    #video-wrap { display: none; margin: 16px auto 0 auto; max-width: 360px; }
+    #video-wrap video { width: 100%; border: 2px solid #3b82f6; border-radius: 6px; }
+    #scanStatus { font-size: 13px; color: #64748b; margin-top: 6px; }
+</style>
+{% endblock %}
+{% block content %}
+    <div id="scan-box">
+        <h1>학생증을 스캔해주세요</h1>
+        <input type="text" id="barcode" autofocus placeholder="바코드 스캔 / 입력 후 Enter">
+
+        <!-- ==================== 카메라 스캔 영역 ===================== -->
+        <div>
+            <button type="button" id="cameraBtn">📷 카메라로 스캔</button>
+            <div id="video-wrap">
+                <video id="scan-video"></video><br>
+                <button type="button" id="cameraStopBtn">스캔 중지</button>
+            </div>
+            <div id="scanStatus"></div>
+        </div>
+
+        <div id="result"></div>
+    </div>
+
+    <!-- ZXing 라이브러리다(카메라 스캔) -->
+    <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <script>
+        const input = document.getElementById('barcode');
+        const resultBox = document.getElementById('result');
+
+        // =============================================================
+        // 물리 바코드 스캐너(Enter 입력)든, 카메라 스캔이 바코드 값만 알면 이 함수 하나로 배식 체크를 처리할 수 있다.
+        //   1) 입력받은 바코드를 서버(/scan/)로 보낸다.
+        //   2) 서버가 계산해 준 예상 대기시간과 혼잡 여부를 받는다.
+        //   3) 혼잡하면 빨간색, 아니면 초록색으로 화면에 보여준다.
+        // =============================================================
+        async function processBarcode(barcode) {
+            if (!barcode) {
+                return;
+            }
+
+            // 1) 서버로 스캔 요청을 보낸다.
+            const res = await fetch('/scan/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ barcode: barcode })
+            });
+            const data = await res.json();
+
+            if (!data.success) {
+                resultBox.innerHTML = '<p class="warn">' + (data.message || data.error) + '</p>';
+                return;
+            }
+
+            // 2) 서버가 계산해서 보내준 값(wait_info)을 꺼낸다.
+            const info = data.wait_info;
+
+            // 3) 혼잡하면(is_congested가 true면) warn 스타일을, 아니면 ok 스타일을 쓴다.
+            let cssClass;
+            if (info.is_congested) {
+                cssClass = 'warn';
+            } else {
+                cssClass = 'ok';
+            }
+
+            let html =
+                '<p>' + data.message + '</p>' +
+                '<p class="' + cssClass + '">' +
+                '현재 대기인원 ' + info.waiting_count + '명 ' +
+                '(우리 반 앞번호 ' + info.own_class_ahead_count + '명 + ' +
+                '먼저 먹는 다른 반 ' + info.other_class_ahead_count + '명) × ' +
+                '1인당 배식시간 ' + info.service_time_per_person + '초 = ' +
+                '예상 대기시간 약 ' + Math.round(info.expected_wait_seconds) + '초' +
+                '</p>' +
+                '<p class="' + cssClass + '">' + info.congestion_message + '</p>';
+
+            // 치기로 기록됐다면 화면에 경고 문구를 추가로 보여준다.
+            if (info.is_line_cut) {
+                html += '<p class="linecut">⚠ ' + info.line_cut_message + '</p>';
+            }
+
+            // =========================================================
+            // 1) 혼잡한 상황 => 다음반 담임에게 공지 자동 등록
+            // 서버가 방금 다음 반에게 자동 알림 공지를 올렸다면(auto_notice_sent_to에 이름이 들어있다면), 배식대 화면에서도 바로 확인할 수 있게 보여준다.
+            // =========================================================
+            if (info.auto_notice_sent_to) {
+                html += '<p class="warn">🔔 ' + info.auto_notice_sent_to +
+                    '에게 혼잡 알림 공지를 자동으로 보냈습니다. (공지 화면에서 확인 가능)</p>';
+            }
+
+            resultBox.innerHTML = html;
+        }
+
+        // 바코드 스캐너(또는 키보드)로 Enter를 누르면 processBarcode()를 호출한다.
+        input.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter') {
+                return;
+            }
+            const barcode = input.value.trim();
+            input.value = '';
+            processBarcode(barcode);
+        });
+
+        // =============================================================
+        // 카메라로 학생증 바코드를 스캔하는 기능이다.
+        // ZXing 라이브러리가 카메라 화면을 계속 분석하다가 바코드를 찾으면 곧바로 processBarcode()를 호출해서 물리 스캐너로 찍은 것과 똑같이 배식 체크가 이루어지도록 한다.
+        // =============================================================
+        let codeReader = null;
+        let isProcessingCameraScan = false;   // 같은 바코드가 연속으로 여러 번 처리되는 것을 막는다.
+
+        function startCameraScan() {
+            document.getElementById('video-wrap').style.display = 'block';
+            document.getElementById('scanStatus').innerText = '카메라를 준비하는 중...';
+
+            codeReader = new ZXing.BrowserMultiFormatReader();
+            codeReader.decodeFromVideoDevice(null, 'scan-video', async function (result, err) {
+                if (result && !isProcessingCameraScan) {
+                    isProcessingCameraScan = true;
+                    document.getElementById('scanStatus').innerText = '스캔됨: ' + result.getText();
+
+                    await processBarcode(result.getText());
+
+                    // 배식 체크가 끝나면 다음 학생을 바로 이어서 찍을 수 있도록 카메라는 끄지 않고 1.5초 뒤에 다시 스캔할 수 있게 풀어준다.
+                    setTimeout(function () {
+                        isProcessingCameraScan = false;
+                        document.getElementById('scanStatus').innerText = '다음 학생증을 비춰주세요';
+                    }, 1500);
+                }
+            }).catch(function () {
+                document.getElementById('scanStatus').innerText =
+                    '카메라를 사용할 수 없습니다. 바코드 스캐너나 직접 입력을 이용해주세요.';
+            });
+        }
+
+        function stopCameraScan() {
+            if (codeReader) {
+                codeReader.reset();
+                codeReader = null;
+            }
+            document.getElementById('video-wrap').style.display = 'none';
+            document.getElementById('scanStatus').innerText = '';
+        }
+
+        document.getElementById('cameraBtn').addEventListener('click', startCameraScan);
+        document.getElementById('cameraStopBtn').addEventListener('click', stopCameraScan);
+    </script>
+{% endblock %}

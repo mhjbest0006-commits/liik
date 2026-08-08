@@ -1,0 +1,135 @@
+<!--
+    base.html
+
+    왼쪽에는 항상 고정된 사이드바 메뉴, 오른쪽에 각 화면의 내용
+
+    다른 html에서 이 파일을 상속받아서 content 부분만 채우면 된다. extends web/base.html
+
+    사이드바에 어떤 메뉴가 보일지는 로그인 여부와 계정 종류(관리자/학생)에 따라 다르게 나타남.
+    (nav_is_authenticated, nav_is_admin 값은 web/context_processors.py 에서 모든 화면에 자동으로 전달해 준다)
+-->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}한백 급식 관리 시스템{% endblock %}</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            display: flex;
+            font-family: -apple-system, "Malgun Gothic", sans-serif;
+            min-height: 100vh;
+        }
+
+        /* 사이드바: position: sticky로 항상 화면 옆에 고정되어 보인다. */
+        #sidebar {
+            width: 210px;
+            flex-shrink: 0;
+            background: #263449;
+            color: #fff;
+            padding: 24px 0;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            overflow-y: auto;
+        }
+        #sidebar h1 {
+            font-size: 17px;
+            text-align: center;
+            margin: 0 0 20px 0;
+            padding: 0 16px;
+        }
+        #sidebar .user-box {
+            margin: 0 16px 16px 16px;
+            padding: 10px 12px;
+            background: #1c2636;
+            border-radius: 6px;
+            font-size: 13px;
+            color: #cbd5e1;
+        }
+        #sidebar .user-box .role-badge {
+            display: inline-block;
+            margin-top: 4px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            background: #3b82f6;
+            color: #fff;
+        }
+        #sidebar .user-box .role-badge.student {
+            background: #10b981;
+        }
+        #sidebar nav a {
+            display: block;
+            color: #e2e8f0;
+            text-decoration: none;
+            padding: 12px 20px;
+            font-size: 14px;
+            border-left: 3px solid transparent;
+        }
+        #sidebar nav a:hover {
+            background: #32405a;
+            border-left: 3px solid #3b82f6;
+        }
+        #sidebar .menu-label {
+            padding: 14px 20px 6px 20px;
+            font-size: 11px;
+            color: #8291a8;
+        }
+
+        #content {
+            flex: 1;
+            padding: 28px 32px;
+            min-width: 0;
+        }
+    </style>
+    {% block extra_style %}{% endblock %}
+</head>
+<body>
+    <!-- ===================== 상시 표시 사이드바 ===================== -->
+    <aside id="sidebar">
+        <h1>급식 관리</h1>
+
+        {% if nav_is_authenticated %}
+        <div class="user-box">
+            {{ nav_username }}님
+            {% if nav_is_admin %}
+                <span class="role-badge">관리자</span>
+            {% else %}
+                <span class="role-badge student">학생</span>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <nav>
+            <a href="/">홈</a>
+
+            {% if nav_is_admin %}
+                <!-- 관리자 계정에게만 보이는 메뉴다. -->
+                <div class="menu-label">관리자 메뉴</div>
+                <a href="/regist/">반/학생 등록</a>
+                <a href="/scan-page/">학생증 스캔</a>
+                <a href="/status-page/">급식 현황</a>
+            {% endif %}
+
+            <div class="menu-label">전체 메뉴</div>
+            <!-- 페이지 분리(공지, 혼잡도 분석) -->
+            <a href="/announce/">공지사항</a>
+            <a href="/congestion/">혼잡도 분석</a>
+
+            <div class="menu-label">계정</div>
+            {% if nav_is_authenticated %}
+                <a href="/logout/">로그아웃</a>
+            {% else %}
+                <a href="/login/">로그인</a>
+                <a href="/signup/">회원가입</a>
+            {% endif %}
+        </nav>
+    </aside>
+
+    <main id="content">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

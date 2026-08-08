@@ -1,0 +1,162 @@
+<!--
+   signup.html
+
+    계정 종류를 학생으로 선택하면 아래 3가지를 추가로 입력해야 한다.
+    1) 반(class_id)
+    2) 번호(number)
+    3) 학생증 바코드(barcode)
+    학생증 바코드는 키보드로 직접 입력해도 되고, 카메라로 스캔 버튼을 눌러서-->
+{% extends "web/base.html" %}
+{% block title %}회원가입{% endblock %}
+{% block extra_style %}
+<style>
+    #studentBox { display: none; margin: 10px 0; padding: 12px; border: 1px dashed #94a3b8; border-radius: 6px; }
+    #studentBox label { display: block; margin-bottom: 8px; }
+    #studentBox input { width: 220px; padding: 4px; }
+
+    /* 카메라 스캔 영역 스타일이다. */
+    #scanArea { margin-top: 8px; }
+    #cameraBtn { padding: 6px 12px; cursor: pointer; }
+    #video-wrap { display: none; margin-top: 10px; }
+    #video-wrap video { width: 100%; max-width: 320px; border: 2px solid #3b82f6; border-radius: 6px; }
+    #scanStatus { font-size: 12px; color: #64748b; margin-top: 4px; }
+</style>
+{% endblock %}
+{% block content %}
+    <h1>회원가입</h1>
+
+    <form id="signupForm">
+        <label>아이디 <input type="text" id="username" required></label><br><br>
+        <label>비밀번호 <input type="password" id="password" required></label><br><br>
+
+        <label>계정 종류
+            <select id="role">
+                <option value="student">학생 (학생증으로 본인 확인 후 가입)</option>
+                <option value="admin">관리자 (모든 화면을 관리할 수 있어요)</option>
+            </select>
+        </label><br><br>
+
+        <!-- 관리자를 선택했을 때만 보이는 입력창--> 
+        <div id="adminCodeBox" style="display:none;">
+            <label>관리자 가입 코드 <input type="text" id="adminCode" placeholder="담당 선생님께 문의하세요"></label>
+            <br><br>
+        </div>
+
+        <!-- =====================  학생 가입 시 학생증 확인 영역 ===================== -->
+        <div id="studentBox">
+            <p style="margin-top:0; font-size:13px; color:#475569;">
+                학생 가입은 담당 선생님이 미리 등록해 둔 학생증 정보와 일치해야 합니다.
+            </p>
+            <label>반 (반 번호) <input type="number" id="signupClassId" placeholder="예: 3"></label>
+            <label>번호 (학생 번호) <input type="number" id="signupNumber" placeholder="예: 12"></label>
+            <label>학생증 바코드
+                <input type="text" id="signupBarcode" placeholder="직접 입력하거나 아래에서 스캔">
+            </label>
+
+            <!-- 카메라로 학생증 바코드를 인식하는 영역 -->
+            <div id="scanArea">
+                <button type="button" id="cameraBtn">📷 카메라로 스캔</button>
+                <div id="video-wrap">
+                    <video id="signup-video"></video><br>
+                    <button type="button" id="cameraStopBtn">스캔 중지</button>
+                </div>
+                <div id="scanStatus"></div>
+            </div>
+        </div>
+
+        <button type="submit">회원가입</button>
+    </form>
+    <p id="message"></p>
+    <p>이미 계정이 있으신가요? <a href="/login/">로그인</a></p>
+
+    <!-- 카메라로 바코드를 읽기 위한 ZXing 라이브러리 -->
+    <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <script>
+        const roleSelect = document.getElementById('role');
+        const adminCodeBox = document.getElementById('adminCodeBox');
+        const studentBox = document.getElementById('studentBox');
+
+        // 계정 종류에서 무엇을 골랐는지에 따라 필요한 입력창
+        function updateRoleBoxes() {
+            if (roleSelect.value === 'admin') {
+                adminCodeBox.style.display = 'block';
+                studentBox.style.display = 'none';
+                stopCameraScan();   // 관리자로 바꾸면 켜져 있던 카메라를 끈다.
+            } else {
+                adminCodeBox.style.display = 'none';
+                studentBox.style.display = 'block';
+            }
+        }
+        roleSelect.addEventListener('change', updateRoleBoxes);
+        updateRoleBoxes();   
+        let codeReader = null;
+
+        function startCameraScan() {
+            document.getElementById('video-wrap').style.display = 'block';
+            document.getElementById('scanStatus').innerText = '카메라를 준비하는 중...';
+
+            codeReader = new ZXing.BrowserMultiFormatReader();
+            codeReader.decodeFromVideoDevice(null, 'signup-video', function (result, err) {
+                if (result) {
+                    // 바코드를 찾으면 입력창에 자동으로 채워주고 카메라를 끈다.
+                    document.getElementById('signupBarcode').value = result.getText();
+                    document.getElementById('scanStatus').innerText = '스캔 완료: ' + result.getText();
+                    stopCameraScan();
+                }
+            }).catch(function () {
+                document.getElementById('scanStatus').innerText =
+                    '카메라를 사용할 수 없습니다. 바코드를 직접 입력해주세요.';
+            });
+        }
+
+        function stopCameraScan() {
+            if (codeReader) {
+                codeReader.reset();
+                codeReader = null;
+            }
+            document.getElementById('video-wrap').style.display = 'none';
+        }
+
+        document.getElementById('cameraBtn').addEventListener('click', startCameraScan);
+        document.getElementById('cameraStopBtn').addEventListener('click', stopCameraScan);
+
+        document.getElementById('signupForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            stopCameraScan();   // 가입 요청을 보내기 전에 카메라는 꺼둔다.
+
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const role = roleSelect.value;
+            const adminCode = document.getElementById('adminCode').value;
+
+            // 학생 가입일 때만 반/번호/바코드를 함께 보낸다.
+            const payload = {
+                username: username,
+                password: password,
+                role: role,
+                admin_code: adminCode,
+            };
+            if (role === 'student') {
+                payload.class_id = document.getElementById('signupClassId').value;
+                payload.number = document.getElementById('signupNumber').value;
+                payload.barcode = document.getElementById('signupBarcode').value;
+            }
+
+            const res = await fetch('/signup/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            const messageBox = document.getElementById('message');
+            messageBox.innerText = data.message || data.error;
+
+            if (data.success) {
+                // 가입에 성공하면 2초 뒤에 로그인 화면으로 이동한다.
+                setTimeout(function () {
+                    window.location.href = '/login/';
+                }, 1500);
+            }
+        });
+    </script>
+{% endblock %}

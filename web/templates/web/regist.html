@@ -1,0 +1,225 @@
+{% extends "web/base.html" %}
+{% block title %}반/학생 등록{% endblock %}
+{% block content %}
+    <h1>반/학생 등록</h1>
+
+    <h2>반 개수 설정</h2>
+    <input type="number" id="classCount" min="1" value="1">
+    <button onclick="setClassrooms()">반 생성</button>
+    <p id="classMsg"></p>
+
+    <h2>학생 등록</h2>
+    <input type="number" id="classId" placeholder="반 번호 (cls_id)">
+    <input type="number" id="studentNumber" placeholder="학생 번호">
+    <input type="text" id="barcode" placeholder="바코드">
+    <button onclick="addStudent()">학생 등록</button>
+    <p id="studentMsg"></p>
+
+    <!-- =====================================================================
+        2) 결석 처리]
+         학생 목록을 반/번호 순서대로 보여주고, 결석한 학생은 체크박스로 바로바로 체크(또는 해제)할 수 있게 만들었다. 여기서 체크한 학생은 스캔 화면(scan.html)에서 학생증을 찍어도 배식 처리가 되지 않고, 대기인원(같은 반 앞번호 / 다른 반) 계산에서도 전부 제외된다.
+    ===================================================================== -->
+    <h2>결석 체크</h2>
+    <p style="color:#64748b; font-size:13px;">
+        결석한 학생을 체크하면 혼잡도(대기인원) 계산과 새치기 판단에서 제외됩니다.
+    </p>
+    <button onclick="loadStudentsForAbsence()">학생 목록 새로고침</button>
+    <table style="border-collapse: collapse; margin-top: 10px;">
+        <thead>
+            <tr>
+                <th style="border:1px solid #ccc; padding:6px 10px;">반</th>
+                <th style="border:1px solid #ccc; padding:6px 10px;">번호</th>
+                <th style="border:1px solid #ccc; padding:6px 10px;">배식 완료</th>
+                <th style="border:1px solid #ccc; padding:6px 10px;">결석</th>
+            </tr>
+        </thead>
+        <tbody id="absenceBody"></tbody>
+    </table>
+
+    <!-- =====================================================================
+         화면에서 연/월을 고르고, 각 반이 그 그룹(홀/짝) 안에서 몇 번째로 먹는지 입력하면, 그 순간부터 스캔 화면이 그 순서를 기준으로 먼저 먹는 반의 인원을 대기인원에 더해서 계산한다.
+    ===================================================================== -->
+    <h2>월별 배식 순서 설정 (홀수반 / 짝수반)</h2>
+    <p style="color:#64748b; font-size:13px;">
+        예) 7월은 홀수반이 1반 -> 3반->5반 순서, 8월은 3반->5반->1반 순서처럼
+        매달 바뀌는 순서를 여기서 다시 입력합니다. 숫자가 작을수록 먼저 먹는 반입니다.
+    </p>
+    <label>연도 <input type="number" id="orderYear" style="width:80px;"></label>
+    <label>월 <input type="number" id="orderMonth" min="1" max="12" style="width:60px;"></label>
+    <button onclick="loadMealOrder()">불러오기</button>
+    <button onclick="saveMealOrder()">저장</button>
+    <p id="orderMsg"></p>
+
+    <div style="display:flex; gap:40px; margin-top:10px;">
+        <div>
+            <h3>홀수반</h3>
+            <table style="border-collapse: collapse;">
+                <thead>
+                    <tr>
+                        <th style="border:1px solid #ccc; padding:6px 10px;">반</th>
+                        <th style="border:1px solid #ccc; padding:6px 10px;">순서</th>
+                    </tr>
+                </thead>
+                <tbody id="oddOrderBody"></tbody>
+            </table>
+        </div>
+        <div>
+            <h3>짝수반</h3>
+            <table style="border-collapse: collapse;">
+                <thead>
+                    <tr>
+                        <th style="border:1px solid #ccc; padding:6px 10px;">반</th>
+                        <th style="border:1px solid #ccc; padding:6px 10px;">순서</th>
+                    </tr>
+                </thead>
+                <tbody id="evenOrderBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        function getCookie(name) {
+            const match = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+            return match ? match.pop() : '';
+        }
+
+        async function setClassrooms() {
+            const count = document.getElementById('classCount').value;
+            const res = await fetch('/classrooms/set/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ count })
+            });
+            const data = await res.json();
+            document.getElementById('classMsg').innerText = data.success ? '반 생성 완료' : '실패';
+        }
+
+        async function addStudent() {
+            const class_id = document.getElementById('classId').value;
+            const number = document.getElementById('studentNumber').value;
+            const barcode = document.getElementById('barcode').value;
+            const res = await fetch('/students/add/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ class_id, number, barcode })
+            });
+            const data = await res.json();
+            document.getElementById('studentMsg').innerText = data.message || data.error;
+        }
+
+        // =================================================================
+        // 2) 결석 처리]
+        // 학생 목록을 불러와서 표로 그리고, 결석 체크박스를 클릭하면 곧바로 /students/absence/ 로 저장 요청을 보내는 함수
+        // =================================================================
+        async function loadStudentsForAbsence() {
+            const res = await fetch('/students/');
+            const students = await res.json();
+            const body = document.getElementById('absenceBody');
+            body.innerHTML = '';
+
+            for (let i = 0; i < students.length; i++) {
+                const s = students[i];
+                const row = document.createElement('tr');
+
+                const eatenText = s.has_eaten ? 'O' : '-';
+                const checkedAttr = s.is_absent ? 'checked' : '';
+
+                row.innerHTML =
+                    '<td style="border:1px solid #ccc; padding:6px 10px;">' + s.cls + '</td>' +
+                    '<td style="border:1px solid #ccc; padding:6px 10px;">' + s.number + '번</td>' +
+                    '<td style="border:1px solid #ccc; padding:6px 10px; text-align:center;">' + eatenText + '</td>' +
+                    '<td style="border:1px solid #ccc; padding:6px 10px; text-align:center;">' +
+                    '<input type="checkbox" ' + checkedAttr + ' onchange="toggleAbsence(' + s.id + ', this.checked)">' +
+                    '</td>';
+                body.appendChild(row);
+            }
+        }
+
+        async function toggleAbsence(studentId, isAbsent) {
+            await fetch('/students/absence/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ student_id: studentId, is_absent: isAbsent })
+            });
+        }
+
+        // =================================================================
+        // 1) 번호 순서 반영(반 배치)]
+        // 연/월을 골라서 현재 저장된 배식 순서를 불러오고(loadMealOrder), 입력한 순서 값을 저장하는(saveMealOrder) 함수
+        // =================================================================
+        function renderOrderRows(bodyId, classes) {
+            const body = document.getElementById(bodyId);
+            body.innerHTML = '';
+            for (let i = 0; i < classes.length; i++) {
+                const c = classes[i];
+                const value = (c.order_no === null || c.order_no === undefined) ? '' : c.order_no;
+                const row = document.createElement('tr');
+                row.innerHTML =
+                    '<td style="border:1px solid #ccc; padding:6px 10px;">' + c.name + '</td>' +
+                    '<td style="border:1px solid #ccc; padding:6px 10px;">' +
+                    '<input type="number" min="1" style="width:60px;" data-cls-id="' + c.cls_id + '" value="' + value + '">' +
+                    '</td>';
+                body.appendChild(row);
+            }
+        }
+
+        async function loadMealOrder() {
+            const year = document.getElementById('orderYear').value;
+            const month = document.getElementById('orderMonth').value;
+
+            let url = '/classrooms/meal-order/';
+            if (year && month) {
+                url += '?year=' + year + '&month=' + month;
+            }
+
+            const res = await fetch(url);
+            const data = await res.json();
+            if (!data.success) {
+                document.getElementById('orderMsg').innerText = '불러오기 실패';
+                return;
+            }
+
+            document.getElementById('orderYear').value = data.year;
+            document.getElementById('orderMonth').value = data.month;
+            renderOrderRows('oddOrderBody', data.odd_classes);
+            renderOrderRows('evenOrderBody', data.even_classes);
+            document.getElementById('orderMsg').innerText = data.year + '년 ' + data.month + '월 순서를 불러왔습니다.';
+        }
+
+        function collectOrderInputs(bodyId) {
+            const inputs = document.getElementById(bodyId).querySelectorAll('input[data-cls-id]');
+            const result = [];
+            for (let i = 0; i < inputs.length; i++) {
+                const input = inputs[i];
+                if (input.value === '') {
+                    continue;   // 순서를 아직 안 정한 반은 저장하지 않는다.
+                }
+                result.push({ cls_id: parseInt(input.getAttribute('data-cls-id'), 10), order_no: parseInt(input.value, 10) });
+            }
+            return result;
+        }
+
+        async function saveMealOrder() {
+            const year = document.getElementById('orderYear').value;
+            const month = document.getElementById('orderMonth').value;
+            if (!year || !month) {
+                document.getElementById('orderMsg').innerText = '연도와 월을 먼저 입력해주세요.';
+                return;
+            }
+
+            const orders = collectOrderInputs('oddOrderBody').concat(collectOrderInputs('evenOrderBody'));
+
+            const res = await fetch('/classrooms/meal-order/set/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ year, month, orders })
+            });
+            const data = await res.json();
+            document.getElementById('orderMsg').innerText = data.message || data.error;
+        }
+
+        // 화면을 처음 열었을 때 결석 체크 목록과, 이번 달 배식 순서를 바로 보여준다.
+        loadStudentsForAbsence();
+        loadMealOrder();
+    </script>
+{% endblock %}

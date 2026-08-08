@@ -1,0 +1,159 @@
+<!--
+    status.html
+-->
+{% extends "web/base.html" %}
+{% block title %}급식 현황{% endblock %}
+{% block extra_style %}
+<style>
+    table { border-collapse: collapse; width: 100%; max-width: 500px; }
+    th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: center; }
+</style>
+{% endblock %}
+{% block content %}
+    <h1>급식 현황</h1>
+    <p id="dateText"></p>
+    <table>
+        <thead>
+            <tr><th>반</th><th>배식 완료</th><th>전체 인원</th></tr>
+        </thead>
+        <tbody id="statusBody"></tbody>
+    </table>
+
+    <!-- =====================================================================
+         1) 급식 현황 데이터 삭제/초기화]
+         이전 데이터가 계속 누적되는 문제를 해결하기 위해 관리자가 직접 정리할 수 있는 버튼 2가지를 추가했다.
+           1) 오늘 배식 상태 초기화 : has_eaten/is_absent를 전부 되돌린다. (다음 끼니/다음 날을 새로 시작할 때 누른다)
+           2) 오래된 기록 삭제: 혼잡도 계산용 WaitLog 기록을 날짜 기준으로, 또는 전체를 관리자가 직접 지운다.
+    ===================================================================== -->
+    <h2 style="margin-top:30px;">데이터 정리</h2>
+    <div style="border:1px solid #ddd; border-radius:8px; padding:16px; max-width:500px;">
+        <h3 style="margin-top:0;">오늘 배식 상태 초기화</h3>
+        <p style="color:#64748b; font-size:13px;">
+            모든 학생의 "배식 완료", "결석" 표시를 전부 되돌립니다. WaitLog(혼잡도 기록)는 지워지지 않습니다.
+        </p>
+        <button onclick="resetDailyStatus()" style="color:#b45309;">오늘 배식 상태 초기화</button>
+        <p id="resetDailyMsg"></p>
+
+        <h3>오래된 혼잡도 기록(WaitLog) 삭제</h3>
+        <p style="color:#64748b; font-size:13px;">
+            선택한 날짜보다 이전에 찍힌 기록을 지웁니다. 예) 8월 1일을 입력하면 7월 31일까지의 기록이 지워집니다.
+        </p>
+        <label>이 날짜 이전 기록 삭제 <input type="date" id="resetBeforeDate"></label>
+        <button onclick="resetWaitLogsBeforeDate()">삭제</button>
+        <br><br>
+        <button onclick="resetAllWaitLogs()" style="color:#c62828;">전체 기록 삭제 (되돌릴 수 없음)</button>
+        <p id="resetLogMsg"></p>
+    </div>
+
+    <!-- ===================== 3) 새치기 확인] ===================== -->
+    <h1 style="margin-top:30px;">새치기 발생 기록</h1>
+    <table>
+        <thead>
+            <tr><th>시각</th><th>반</th><th>찍은 학생</th><th>제친 학생 번호</th></tr>
+        </thead>
+        <tbody id="lineCutBody"></tbody>
+    </table>
+
+    <script>
+        // /status/ (기존 API)에서 반별 현황 데이터를 받아와 표로
+        async function loadStatus() {
+            const res = await fetch('/status/');
+            const data = await res.json();
+
+            document.getElementById('dateText').innerText = data.date + ' 기준';
+
+            const body = document.getElementById('statusBody');
+            body.innerHTML = '';
+
+            for (let i = 0; i < data.records.length; i++) {
+                const record = data.records[i];
+                const row = document.createElement('tr');
+                row.innerHTML =
+                    '<td>' + record.class + '</td>' +
+                    '<td>' + record.current + '</td>' +
+                    '<td>' + record.total + '</td>';
+                body.appendChild(row);
+            }
+
+            if (data.records.length === 0) {
+                body.innerHTML = '<tr><td colspan="3">아직 데이터가 없습니다.</td></tr>';
+            }
+        }
+
+        loadStatus();
+
+        // =================================================================
+        // 1) 급식 현황 데이터 삭제/초기화
+        // =================================================================
+        async function resetDailyStatus() {
+            if (!confirm('모든 학생의 배식 완료/결석 표시를 초기화합니다. 계속할까요?')) {
+                return;
+            }
+            const res = await fetch('/status/reset-daily/', { method: 'POST' });
+            const data = await res.json();
+            document.getElementById('resetDailyMsg').innerText = data.message || data.error;
+            loadStatus();
+        }
+
+        async function resetWaitLogsBeforeDate() {
+            const beforeDate = document.getElementById('resetBeforeDate').value;
+            if (!beforeDate) {
+                document.getElementById('resetLogMsg').innerText = '날짜를 먼저 선택해주세요.';
+                return;
+            }
+            if (!confirm(beforeDate + ' 이전의 모든 혼잡도 기록을 삭제합니다. 계속할까요?')) {
+                return;
+            }
+            const res = await fetch('/status/reset-wait-logs/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: 'before_date', before_date: beforeDate })
+            });
+            const data = await res.json();
+            document.getElementById('resetLogMsg').innerText = data.message || data.error;
+            loadLineCutLogs();
+        }
+
+        async function resetAllWaitLogs() {
+            if (!confirm('전체 혼잡도 기록을 삭제합니다. 이 작업은 되돌릴 수 없습니다. 계속할까요?')) {
+                return;
+            }
+            const res = await fetch('/status/reset-wait-logs/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: 'all' })
+            });
+            const data = await res.json();
+            document.getElementById('resetLogMsg').innerText = data.message || data.error;
+            loadLineCutLogs();
+        }
+
+        // =================================================================
+        // 3) 새치기 확인
+        // 새치기로 기록된 WaitLog를 최근 순서로 불러와서 표로 보여준다. 몇 반 몇 번 학생이 몇 번 학생들을 제치고 먼저 찍었는지 확인할 수 있다.
+        // =================================================================
+        async function loadLineCutLogs() {
+            const res = await fetch('/api/line-cut-logs/');
+            const data = await res.json();
+            const body = document.getElementById('lineCutBody');
+            body.innerHTML = '';
+
+            for (let i = 0; i < data.logs.length; i++) {
+                const log = data.logs[i];
+                const row = document.createElement('tr');
+                row.innerHTML =
+                    '<td>' + log.scanned_at + '</td>' +
+                    '<td>' + log.cls_name + '</td>' +
+                    '<td>' + log.scanned_student_number + '번</td>' +
+                    '<td>' + log.skipped_student_numbers + '번</td>';
+                body.appendChild(row);
+            }
+
+            if (data.logs.length === 0) {
+                body.innerHTML = '<tr><td colspan="4">새치기 기록이 없습니다.</td></tr>';
+            }
+        }
+
+        loadLineCutLogs();
+    </script>
+{% endblock %}

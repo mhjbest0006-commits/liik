@@ -1,0 +1,105 @@
+<!--
+    congestion.html
+
+        1) 확률 : 혼잡할 확률(상대도수)
+        2) 통계 : 시간대별 평균, 중앙값을 표로 표현
+        3) 일차함수 : 대기인원과 대기시간의 관계식
+-->
+{% extends "web/base.html" %}
+{% block title %}혼잡도 분석{% endblock %}
+{% block extra_style %}
+<style>
+    section { margin-bottom: 30px; padding: 16px; border: 1px solid #ddd; border-radius: 8px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: center; }
+</style>
+{% endblock %}
+{% block content %}
+    <h1>혼잡도 분석</h1>
+
+    <section id="probability-section">
+        <h2>혼잡 확률 (상대도수)</h2>
+        <p id="probability-text">불러오는 중...</p>
+    </section>
+
+    <section id="statistics-section">
+        <h2>시간대별 혼잡도 통계</h2>
+        <table>
+            <thead>
+                <tr><th>시간대</th><th>표본 수</th><th>평균 대기인원</th><th>중앙값</th></tr>
+            </thead>
+            <tbody id="statistics-body"></tbody>
+        </table>
+        <p id="busiest-hour-text"></p>
+    </section>
+
+    <section id="linear-model-section">
+        <h2>대기인원-대기시간 관계 (일차함수)</h2>
+        <p id="linear-model-text">불러오는 중...</p>
+    </section>
+
+    <script>
+        // 1) 서버에 혼잡 확률을 물어보고 화면에 보여주는 함수다.
+        async function loadProbability() {
+            const res = await fetch('/api/congestion-probability/');
+            const data = await res.json();
+            const el = document.getElementById('probability-text');
+
+            if (data.total_count === 0) {
+                el.innerText = '아직 데이터가 없습니다.';
+                return;
+            }
+
+            const percent = (data.probability * 100).toFixed(1);
+            el.innerHTML =
+                '혼잡 확률 = 혼잡 발생 ' + data.congested_count + '회 / ' +
+                '전체 관찰 ' + data.total_count + '회 = <b>' + percent + '%</b>';
+        }
+
+        // 2) 서버에 시간대별 통계를 요청 후 표로
+        async function loadStatistics() {
+            const res = await fetch('/api/time-statistics/');
+            const data = await res.json();
+            const body = document.getElementById('statistics-body');
+            body.innerHTML = '';
+
+            for (let i = 0; i < data.hourly.length; i++) {
+                const h = data.hourly[i];
+                const row = document.createElement('tr');
+                row.innerHTML =
+                    '<td>' + h.hour + '시</td>' +
+                    '<td>' + h.count + '</td>' +
+                    '<td>' + h.mean + '</td>' +
+                    '<td>' + h.median + '</td>';
+                body.appendChild(row);
+            }
+
+            const busiestEl = document.getElementById('busiest-hour-text');
+            if (data.busiest_hour !== null) {
+                busiestEl.innerText = '가장 혼잡한(평균 대기인원이 많은) 시간대: ' + data.busiest_hour + '시';
+            } else {
+                busiestEl.innerText = '';
+            }
+        }
+
+        // 3) 서버에 일차함수 식을 요청 후  화면에 표현 함수.
+        async function loadLinearModel() {
+            const res = await fetch('/api/linear-wait-model/');
+            const data = await res.json();
+            const el = document.getElementById('linear-model-text');
+
+            if (data.model.a === null) {
+                el.innerText = data.model.equation;
+                return;
+            }
+
+            el.innerHTML =
+                '실제 대기시간(초) ≈ <b>' + data.model.equation + '</b> ' +
+                '(표본 ' + data.model.sample_size + '건 기준)';
+        }
+
+        loadProbability();
+        loadStatistics();
+        loadLinearModel();
+    </script>
+{% endblock %}
